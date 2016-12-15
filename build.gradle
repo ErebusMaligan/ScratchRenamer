@@ -9,7 +9,7 @@ ext {
 	deployedLibDir = "Apps/run"
 	libDest = "deployed/Tools/libs"
 	jarPathPrefix = "../../libs/"
-	mainClass = "app.ScratchRename"
+	mainClass = "app.ScratchRenamer"
 	iconFile = 'rename.ico'
 }
 
