@@ -1,25 +1,16 @@
 package app;
 
 
-import gui.entry.CheckEntry;
-import gui.entry.DirectoryEntry;
-import gui.entry.Entry;
-import gui.props.UIEntryProps;
-import gui.props.variable.BooleanVariable;
-import gui.props.variable.IntVariable;
-import gui.props.variable.StringVariable;
-
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.Arrays;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import javax.swing.BoxLayout;
 import javax.swing.ImageIcon;
@@ -29,6 +20,14 @@ import javax.swing.JPanel;
 import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
 
+import comparator.WindowsExplorerFileComparator;
+import gui.entry.CheckEntry;
+import gui.entry.DirectoryEntry;
+import gui.entry.Entry;
+import gui.props.UIEntryProps;
+import gui.props.variable.BooleanVariable;
+import gui.props.variable.IntVariable;
+import gui.props.variable.StringVariable;
 import process.NonStandardProcess;
 import process.ProcessManager;
 import process.io.ProcessStreamSiphon;
@@ -37,6 +36,7 @@ import statics.GUIUtils;
 import statics.StringUtils;
 import ui.log.LogDialog;
 import ui.log.LogFileSiphon;
+import xml.XMLUtils;
 
 /**
  * @author Daniel J. Rivers
@@ -56,7 +56,6 @@ public class ScratchRenamer extends JFrame {
 		ImageIcon icon = new ImageIcon( getClass().getResource( "rename.png" ) );
 		this.setTitle( "Scratch Renamer" );
 		this.setIconImage( icon.getImage() );
-		this.setSize( new Dimension( 420, 270 ) );
 		this.setDefaultCloseOperation( EXIT_ON_CLOSE );
 		this.setLayout( new BorderLayout() );
 		
@@ -65,14 +64,18 @@ public class ScratchRenamer extends JFrame {
 		props.addVariable( "series", new StringVariable() );
 		props.addVariable( "season", new IntVariable( 1 ) );
 		props.addVariable( "starting", new IntVariable( 1 ) );
+		props.addVariable( "episode", new StringVariable( "" ) );
 		props.addVariable( "process", new StringVariable( "scratchRename" ) );
-		props.addVariable( "titleOnly", new BooleanVariable( false ) );
+		props.addVariable( "rename", new BooleanVariable( true ) );
+		props.addVariable( "nfo", new BooleanVariable( false ) );
+		props.addVariable( "overwrite", new BooleanVariable( false ) );
 		
 		rename = new ScratchRename( props.getString( "process" ) );
 		this.add( dirPanel(), BorderLayout.CENTER );
 		JButton b = new JButton( "Run Rename" );
 		b.addActionListener( e -> rename.execute() );
 		this.add( b, BorderLayout.SOUTH );
+		this.pack();
 		this.setVisible( true );
 	}
 
@@ -87,9 +90,15 @@ public class ScratchRenamer extends JFrame {
 		GUIUtils.spacer( p );
 		p.add( new Entry( "Start #:", props.getVariable( "starting" ), new Dimension( GUIUtils.SHORT ) ) );
 		GUIUtils.spacer( p );
+		p.add( new Entry( "Episode Name:", props.getVariable( "episode" ), new Dimension( GUIUtils.SHORT ) ) );
+		GUIUtils.spacer( p );
 		p.add( new Entry( "Log Name:", props.getVariable( "logName" ), new Dimension( GUIUtils.SHORT ) ) );
 		GUIUtils.spacer( p );
-		p.add( new CheckEntry( "Title Only", props.getVariable( "titleOnly" ), new Dimension( GUIUtils.SHORT ) ) );
+		p.add( new CheckEntry( "Rename Files", props.getVariable( "rename" ), new Dimension( GUIUtils.LONG ) ) );
+		GUIUtils.spacer( p );
+		p.add( new CheckEntry( "Generate NFO", props.getVariable( "nfo" ), new Dimension( GUIUtils.LONG ) ) );
+		GUIUtils.spacer( p );
+		p.add( new CheckEntry( "Overwrite Name", props.getVariable( "overwrite" ), new Dimension( GUIUtils.LONG ) ) );
 		return p;
 	}
 
@@ -125,8 +134,8 @@ public class ScratchRenamer extends JFrame {
 				};
 				new LogDialog( ScratchRenamer.this, runName, false );
 				File f = new File( props.getString( "sourceDir" ) );
-				rename( f );
-				sendMessage( "Completed Renaming files in: " + f.getAbsolutePath() );
+				proc( f );
+				
 				log.notifyProcessEnded( name );
 				ProcessManager.getInstance().removeAll( name );
 			} catch ( Exception e ) {
@@ -137,35 +146,83 @@ public class ScratchRenamer extends JFrame {
 			}
 		}
 		
-		private void rename( File f ) {
+		private void proc( File f ) {
 			int i = (Integer)props.getVariable( "starting" ).getValue();
-			Map<String, File> map = new HashMap<>();
-			for ( File d : f.listFiles() ) {
-				if ( d.isFile() && !d.getName().endsWith( ".log" ) && !d.getName().equals( "Thumbs.db" ) ) {
-					map.put( d.getName(), d );
+			List<File> files = Arrays.asList( f.listFiles() );
+			files.sort( new WindowsExplorerFileComparator() );
+			for ( File d : files ) {
+				if ( d.isFile() && !d.getName().endsWith( ".log" ) && !d.getName().equals( "Thumbs.db" ) && !d.getName().endsWith( ".nfo" ) ) {
+
+					if ( (Boolean)props.getVariable( "rename" ).getValue() ) {
+						d = rename( f, d, i );
+						i++;
+					}
+
+					if ( (Boolean)props.getVariable( "nfo" ).getValue() ) {
+						rename.sendMessage( "Generating NFO File" );
+						File out = new File( d.getAbsolutePath().substring( 0, d.getAbsolutePath().lastIndexOf( "." ) ) + ".nfo" );
+						if ( !out.exists() ) {
+							writeNFOFile( d, out );
+						} else {
+							rename.sendMessage( "nfo file exists for:  " + out.getName() + " skipping to next" );
+						}
+					}
+
 				}
 			}
-			List<String> keys = new ArrayList<>( map.keySet() );
-			Collections.sort( keys, new Comparator<String>() {
-			    public int compare(String o1, String o2) {
-			        return extractInt(o1) - extractInt(o2);
-			    }
-
-			    int extractInt(String s) {
-			        String num = s.replaceAll("\\D", "");
-			        // return 0 if no digits found
-			        return num.isEmpty() ? 0 : Integer.parseInt(num);
-			    }
-			} );
-			for ( String s : keys ) {
-				File d = map.get( s );
-				File n = new File( f.getAbsolutePath() + "/" + props.getString( "series" ) + 
-						( ( (Boolean)props.getVariable( "titleOnly" ).getValue() ) ?
-						d.getName().substring( d.getName().lastIndexOf( "_s" ) )
-						: "_s" + StringUtils.addZeroes( Integer.parseInt( props.getString( "season" ) ) ) + "e" + StringUtils.addZeroes( i ) + "." + FileUtils.getSuffix( d ) ) );
-				sendMessage( "Renaming: " + d.getAbsolutePath() + " ---> " + n.getAbsolutePath() );
-				d.renameTo( n );
-				i++;
+			rename.sendMessage( "Completed processing files in: " + f.getAbsolutePath() );
+		}
+		
+		private File rename( File f, File d, int i ) {
+			String series = props.getString( "series" );
+			String season = "S" + StringUtils.addZeroes( Integer.parseInt( props.getString( "season" ) ) );
+			String episode = "E" + StringUtils.addZeroes( i );
+			String suffix = FileUtils.getSuffix( d );
+			String part = String.valueOf( i - (Integer)props.getVariable( "starting" ).getValue() );
+			String episodeName = ( (Boolean)props.getVariable( "overwrite" ).getValue() ) ? props.getString( "episode" ) + " P" + part : getExistingEpisodeName( d );
+			File n = new File( f.getAbsolutePath() + "/" + series + " - " + season + episode + " - " + episodeName + "." + suffix );
+			sendMessage( "Renaming: " + d.getAbsolutePath() + " ---> " + n.getAbsolutePath() );
+			d.renameTo( n );
+			return n;
+		}
+		
+		private String getExistingEpisodeName( File d ) {
+			String ret = "";
+			int s = d.getName().lastIndexOf( " - " );
+			if ( s != -1 ) {
+				s = s + 3;
+				int e = d.getName().lastIndexOf( "." );
+				if ( e != -1 ) {
+					ret = d.getName().substring( s, e );
+				}
+			}
+			return ret;
+		}
+		
+		private void writeNFOFile( File in, File out ) {
+			String[] full = in.getName().substring( 0, in.getName().lastIndexOf( "." ) ).split( "-" );
+			String episode = "";
+			String season = "";
+			String title = full[ full.length - 1 ].trim();
+			for ( String s : full ) {
+				String t = s.trim();
+				if ( t.matches( "[sS](\\d{2,})[eE](\\d{2,})" ) ) {
+					int i = t.indexOf( "e" );
+					if ( i == -1 ) {
+						i = t.indexOf( "E" );
+					}
+					season = String.valueOf( Integer.parseInt( t.substring( 1, i ) ) );
+					episode = String.valueOf( Integer.parseInt( t.substring( i + 1 ) ) );
+				}
+			}
+			try ( PrintWriter write = new PrintWriter( out ) ) {
+				write.print( XMLUtils.wrapInTag( "\n\t" + XMLUtils.wrapInTag( title, "title" ) + "\n\t" + XMLUtils.wrapInTag( season, "season" ) + "\n\t" + XMLUtils.wrapInTag( episode, "episode" ) + "\n", "episodedetails" ) );
+				rename.sendMessage( "wrote nfo to:  " + out.getName() );
+			} catch ( FileNotFoundException e ) {
+				StringWriter sw = new StringWriter();
+				e.printStackTrace( new PrintWriter( sw ) );
+				rename.sendMessage( sw.toString() );
+				e.printStackTrace();
 			}
 		}
 	}
