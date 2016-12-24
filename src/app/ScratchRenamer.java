@@ -65,6 +65,7 @@ public class ScratchRenamer extends JFrame {
 		props.addVariable( "season", new IntVariable( 1 ) );
 		props.addVariable( "starting", new IntVariable( 1 ) );
 		props.addVariable( "episode", new StringVariable( "" ) );
+		props.addVariable( "partNum", new IntVariable( 1 ) );
 		props.addVariable( "process", new StringVariable( "scratchRename" ) );
 		props.addVariable( "rename", new BooleanVariable( true ) );
 		props.addVariable( "nfo", new BooleanVariable( false ) );
@@ -99,6 +100,8 @@ public class ScratchRenamer extends JFrame {
 		p.add( new CheckEntry( "Generate NFO", props.getVariable( "nfo" ), new Dimension( GUIUtils.LONG ) ) );
 		GUIUtils.spacer( p );
 		p.add( new CheckEntry( "Overwrite Name", props.getVariable( "overwrite" ), new Dimension( GUIUtils.LONG ) ) );
+		GUIUtils.spacer( p );
+		p.add( new Entry( "Series Part #", props.getVariable( "partNum" ), new Dimension( GUIUtils.SHORT) ) );
 		return p;
 	}
 
@@ -178,7 +181,7 @@ public class ScratchRenamer extends JFrame {
 			String season = "S" + StringUtils.addZeroes( Integer.parseInt( props.getString( "season" ) ) );
 			String episode = "E" + StringUtils.addZeroes( i );
 			String suffix = FileUtils.getSuffix( d );
-			String part = String.valueOf( i - (Integer)props.getVariable( "starting" ).getValue() );
+			String part = String.valueOf( i - (Integer)props.getVariable( "starting" ).getValue() + (Integer)props.getVariable( "partNum" ).getValue() );
 			String episodeName = ( (Boolean)props.getVariable( "overwrite" ).getValue() ) ? props.getString( "episode" ) + " P" + part : getExistingEpisodeName( d );
 			File n = new File( f.getAbsolutePath() + "/" + series + " - " + season + episode + " - " + episodeName + "." + suffix );
 			sendMessage( "Renaming: " + d.getAbsolutePath() + " ---> " + n.getAbsolutePath() );
